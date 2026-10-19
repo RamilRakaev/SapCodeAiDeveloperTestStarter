@@ -20,7 +20,7 @@
 
 - [x] [`tasks/01-validation-and-normalization.md`](tasks/01-validation-and-normalization.md) — Валидация и нормализация входных данных
 - [x] [`tasks/02-deduplication-and-db.md`](tasks/02-deduplication-and-db.md) — Дедупликация заявок по `(source, external_id)` и сохранение в БД
-- [ ] [`tasks/03-unit-tests.md`](tasks/03-unit-tests.md) — Расширение набора unit-тестов и проверка всех сценариев
+- [x] [`tasks/03-unit-tests.md`](tasks/03-unit-tests.md) — Расширение набора unit-тестов и проверка всех сценариев
 - [ ] [`tasks/04-report-and-git.md`](tasks/04-report-and-git.md) — Оформление `REPORT.md` и фиксация изменений в Git
 
 ---
@@ -29,3 +29,4 @@
 
 - **01. Валидация и нормализация входных данных** — 2026-10-19 14:12. В `app.py` добавлена проверка `event` до записи в базу: событие должно быть словарём, поля `source`, `external_id`, `customer`, `message` обязательны и имеют тип `str`, краевые пробелы снимаются с сохранением регистра, пустое поле после `strip()` даёт `{"status": "invalid", "reason": "..."}`. Невалидное событие не создаёт строк в `leads` и `notifications`. Проверка сценариев: 17/17. `py -3 -m unittest discover -s tests -v`: 4 падения на дедупликации (задача 02) и 4 `ERROR` в `tearDown` из-за незакрытого соединения в `count()` существующих тестов.
 - **02. Дедупликация заявок по `(source, external_id)` и работа с БД** — 2026-10-19 14:16. В `_prepare_db` добавлен уникальный индекс `idx_leads_source_external_id`. Повтор пары возвращает `duplicate` с тем же `id`, не создаёт новую заявку и уведомление и не перезаписывает `customer` и `message`. Регистр `source` учитывается. Проверка сценариев: 5/5. `py -3 -m unittest discover -s tests -v`: падений утверждений нет, `test_duplicate_after_reopening_database` — `ok`, 7 `ERROR` только в `tearDown` из-за незакрытого соединения SQLite в существующих тестах.
+- **03. Расширение набора unit-тестов и проверка всех сценариев** — 2026-10-19 14:18. Добавлены три теста: регистр `source`, сохранение `customer` и `message` после `strip()`, отсутствие ключа / `None` / не-словарь без исключения. Соединения в тестах закрываются явно. `py -3 -m unittest discover -s tests -v`: `Ran 11 tests in 0.274s`, `OK`.

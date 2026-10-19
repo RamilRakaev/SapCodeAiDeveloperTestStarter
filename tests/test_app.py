@@ -1,5 +1,6 @@
 """Публичные тесты. Часть из них на исходной версии приложения падает — это нормально."""
 
+import gc
 import sqlite3
 import tempfile
 import unittest
@@ -22,12 +23,17 @@ class LeadProcessorTests(unittest.TestCase):
         self.db_path = str(Path(self.tmp.name) / "leads.sqlite3")
 
     def tearDown(self):
+        # Контекстный менеджер sqlite3 не закрывает соединение, на Windows файл остаётся занят.
+        gc.collect()
         self.tmp.cleanup()
 
     def count(self, table):
-        with sqlite3.connect(self.db_path) as conn:
-            exists = conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
-            return conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] if exists else 0
+        connection = sqlite3.connect(self.db_path)
+        try:
+            exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone()
+            return connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] if exists else 0
+        finally:
+            connection.close()
 
     def test_new_lead_creates_one_notification(self):
         response = process_event(dict(GOOD), self.db_path)
@@ -70,8 +76,11 @@ class LeadProcessorTests(unittest.TestCase):
         first = process_event(dict(GOOD), self.db_path)
         response = process_event({**GOOD, "customer": "Другая подпись", "message": "Изменённый текст"}, self.db_path)
         self.assertEqual(response, {"status": "duplicate", "id": first["id"]})
-        with sqlite3.connect(self.db_path) as conn:
-            row = conn.execute("SELECT customer, message FROM leads WHERE id=?", (first["id"],)).fetchone()
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute("SELECT customer, message FROM leads WHERE id=?", (first["id"],)).fetchone()
+        finally:
+            connection.close()
         self.assertEqual(row, (GOOD["customer"], GOOD["message"]))
 
     def test_duplicate_after_reopening_database(self):
@@ -84,6 +93,51 @@ class LeadProcessorTests(unittest.TestCase):
         response = process_event({**GOOD, "external_id": 100}, self.db_path)
         self.assertEqual(response["status"], "invalid")
         self.assertEqual(self.count("leads"), 0)
+
+    def test_source_case_creates_separate_leads(self):
+        first = process_event({**GOOD, "source": "Telegram"}, self.db_path)
+        second = process_event({**GOOD, "source": "telegram"}, self.db_path)
+        self.assertEqual(first["status"], "created")
+        self.assertEqual(second["status"], "created")
+        self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(self.count("leads"), 2)
+        self.assertEqual(self.count("notifications"), 2)
+
+    def test_customer_and_message_are_stored_trimmed(self):
+        response = process_event(
+            {
+                **GOOD,
+                "customer": "  Учебный клиент  ",
+                "message": "  Нужна доставка в Казань  ",
+            },
+            self.db_path,
+        )
+        self.assertEqual(response["status"], "created")
+        connection = sqlite3.connect(self.db_path)
+        try:
+            row = connection.execute(
+                "SELECT customer, message FROM leads WHERE id=?",
+                (response["id"],),
+            ).fetchone()
+        finally:
+            connection.close()
+        self.assertEqual(row, (GOOD["customer"], GOOD["message"]))
+
+    def test_missing_key_none_and_non_dict_are_invalid(self):
+        missing = dict(GOOD)
+        del missing["source"]
+        events = (
+            missing,
+            {**GOOD, "message": None},
+            ["not-a-dict"],
+            None,
+        )
+        for event in events:
+            result = process_event(event, self.db_path)
+            self.assertEqual(result["status"], "invalid")
+            self.assertTrue(result.get("reason"))
+        self.assertEqual(self.count("leads"), 0)
+        self.assertEqual(self.count("notifications"), 0)
 
 
 if __name__ == "__main__":
