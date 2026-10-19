@@ -18,7 +18,7 @@
 
 ## Список задач (`tasks/`)
 
-- [ ] [`tasks/01-validation-and-normalization.md`](tasks/01-validation-and-normalization.md) — Валидация и нормализация входных данных
+- [x] [`tasks/01-validation-and-normalization.md`](tasks/01-validation-and-normalization.md) — Валидация и нормализация входных данных
 - [ ] [`tasks/02-deduplication-and-db.md`](tasks/02-deduplication-and-db.md) — Дедупликация заявок по `(source, external_id)` и сохранение в БД
 - [ ] [`tasks/03-unit-tests.md`](tasks/03-unit-tests.md) — Расширение набора unit-тестов и проверка всех сценариев
 - [ ] [`tasks/04-report-and-git.md`](tasks/04-report-and-git.md) — Оформление `REPORT.md` и фиксация изменений в Git
@@ -27,4 +27,4 @@
 
 ## Журнал выполненных задач
 
-_Пока нет выполненных задач. Записывайте сюда каждую завершённую задачу в формате: номер и название задачи, дата/время, что сделано, результаты проверок._
+- **01. Валидация и нормализация входных данных** — 2026-10-19 14:12. В `app.py` добавлена проверка `event` до записи в базу: событие должно быть словарём, поля `source`, `external_id`, `customer`, `message` обязательны и имеют тип `str`, краевые пробелы снимаются с сохранением регистра, пустое поле после `strip()` даёт `{"status": "invalid", "reason": "..."}`. Невалидное событие не создаёт строк в `leads` и `notifications`. Проверка сценариев: 17/17. `py -3 -m unittest discover -s tests -v`: 4 падения на дедупликации (задача 02) и 4 `ERROR` в `tearDown` из-за незакрытого соединения в `count()` существующих тестов.
