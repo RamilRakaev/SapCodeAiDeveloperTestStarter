@@ -1,4 +1,4 @@
-"""Небольшой учебный обработчик заявок. Некоторые сценарии реализованы с ошибками.
+"""Небольшой учебный обработчик заявок.
 
 Тестовое задание САП КОД. Используются только синтетические данные.
 """
@@ -21,8 +21,21 @@ def _prepare_db(connection: sqlite3.Connection) -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             lead_id INTEGER NOT NULL
         );
+
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_leads_source_external_id
+            ON leads (source, external_id);
         """
     )
+
+
+def _find_lead_id(connection: sqlite3.Connection, source: str, external_id: str) -> int | None:
+    row = connection.execute(
+        "SELECT id FROM leads WHERE source = ? AND external_id = ?",
+        (source, external_id),
+    ).fetchone()
+    if row is None:
+        return None
+    return int(row[0])
 
 
 _REQUIRED_FIELDS = ("source", "external_id", "customer", "message")
@@ -71,24 +84,38 @@ def process_event(event: dict, db_path: str) -> dict:
     connection = sqlite3.connect(db_path)
     try:
         _prepare_db(connection)
+        existing_id = _find_lead_id(
+            connection, normalized["source"], normalized["external_id"]
+        )
+        if existing_id is not None:
+            return {"status": "duplicate", "id": existing_id}
 
-        cursor = connection.execute(
-            """
-            INSERT INTO leads (source, external_id, customer, message)
-            VALUES (?, ?, ?, ?)
-            """,
-            (
-                normalized["source"],
-                normalized["external_id"],
-                normalized["customer"],
-                normalized["message"],
-            ),
-        )
-        lead_id = cursor.lastrowid
-        connection.execute(
-            "INSERT INTO notifications (lead_id) VALUES (?)", (lead_id,)
-        )
-        connection.commit()
+        try:
+            cursor = connection.execute(
+                """
+                INSERT INTO leads (source, external_id, customer, message)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    normalized["source"],
+                    normalized["external_id"],
+                    normalized["customer"],
+                    normalized["message"],
+                ),
+            )
+            lead_id = int(cursor.lastrowid)
+            connection.execute(
+                "INSERT INTO notifications (lead_id) VALUES (?)", (lead_id,)
+            )
+            connection.commit()
+        except sqlite3.IntegrityError:
+            connection.rollback()
+            existing_id = _find_lead_id(
+                connection, normalized["source"], normalized["external_id"]
+            )
+            if existing_id is None:
+                raise
+            return {"status": "duplicate", "id": existing_id}
+        return {"status": "created", "id": lead_id}
     finally:
         connection.close()
-    return {"status": "created", "id": lead_id}
